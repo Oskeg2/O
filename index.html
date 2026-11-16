@@ -671,9 +671,17 @@ function caseArt2(c,i,big){
 function vCases(){
   if(sub.case)return vCase(sub.case);
   const fl=S.free_left||0;
-  $('#view').innerHTML='<h2 class="fi">Кейсы</h2>'+tasksBtn()+'<div class="card fi" style="margin-bottom:14px;text-align:center"><div style="font-size:34px">🎁</div><div class="d" style="font-size:16px;margin:4px 0">Бесплатный кейс</div><p class="mu" style="margin:0 0 10px">Раз в 24 часа</p><button class="btn '+(fl?'ghost dis':'gold')+'" onclick="openFree()">'+(fl?'Откроется через '+fmt(fl):'Открыть бесплатно')+'</button></div><div class="grid g2">'+caseList().map(([id,c],i)=>{const n=c.name.split(' ').slice(1),t=palOf(c,i);
+  const fr=`<div class="case cc fi" style="--gl:#ffc24b;--c1:#ffc24b;--i:0" onclick="sub.case='free';render()"><div class="cc-art" style="--c1:#ffc24b;--c2:#ff8a3d;--c3:#ffe08a"><i class="cc-rays"></i><i class="cc-glow"></i><i class="cc-stars"></i><span class="cc-tag">до 10 ⭐</span><div class="cc-it hero"><span class="ci ce">🎁</span></div></div><div class="cc-foot"><div class="nm">Бесплатный</div><div class="pr">${fl?fmt(fl):'0 ⭐'}</div></div></div>`;
+  $('#view').innerHTML='<h2 class="fi">Кейсы</h2><div class="grid g2">'+fr+caseList().map(([id,c],i)=>{const n=c.name.split(' ').slice(1),t=palOf(c,i);
     return`<div class="case cc fi" style="--gl:${t[0]};--c1:${t[0]};--i:${i+1}" onclick="sub.case='${id}';render()">${caseArt2(c,i)}<div class="cc-foot"><div class="nm">${n.join(' ')}</div><div class="pr">${nf(c.price)} ⭐</div></div></div>`}).join('')+'</div><p class="mu" style="margin-top:16px;text-align:center">Выбей подарок и забери его себе или продай за звёзды</p>'}
+function vFree(){
+  const fl=S.free_left||0,t=['#ffc24b','#ff8a3d','#ffe08a'],ds=C.free.map(k=>info(k)).sort((a,b)=>b.v-a.v);
+  $('#view').innerHTML=`<button class="mu" onclick="sub={};render()">← Все кейсы</button>
+  <div class="stage cc2" style="--gl:${t[0]}"><div class="cc-art lg" style="--c1:${t[0]};--c2:${t[1]};--c3:${t[2]}"><i class="cc-rays"></i><i class="cc-glow"></i><i class="cc-stars"></i><span class="cc-tag">до 10 ⭐</span><div class="cc-it hero"><span class="ci ce">🎁</span></div></div><h2 class="d">Бесплатный кейс</h2><div class="badges"><span class="bd">Раз в 24 часа</span></div></div>
+  <button class="btn ${fl?'ghost dis':'gold'} fi" style="--i:8;margin-bottom:12px" onclick="openFree()">${fl?'Откроется через '+fmt(fl):'Открыть бесплатно'}</button>
+  <h3 class="fi" style="--i:12">Что внутри</h3><div class="grid g3">${ds.map((d,k)=>`<div class="fi" style="--i:${13+k}">${tile(d)}</div>`).join('')}</div>`}
 function vCase(id){
+  if(id==='free')return vFree();
   const c=C.cases[id],i=caseIdx(id),[em,...nm]=c.name.split(' '),t=palOf(c,i),nn=curN(),ds=c.drops.map(d=>({...info(d[0]),p:d[1]})).sort((a,b)=>b.v-a.v);
   $('#view').innerHTML=`<button class="mu" onclick="sub={};render()">← Все кейсы</button>
   <div class="stage cc2" style="--gl:${t[0]}">${caseArt2(c,i,true)}<h2 class="d">${nm.join(' ')}</h2><div class="badges"><span class="bd">${nf(c.price)} ⭐</span></div></div>
@@ -883,9 +891,8 @@ async function vWd(){
 function vMe(){
   if(sub.pt==='wd')return vWd();
   const u=S.u,got=new Set(S.ach),canWd=u.total_dep>=C.min_dep_wd,link=`https://t.me/${C.bot}?start=ref${S.id}`;
-  $('#view').innerHTML=`<h2>Профиль</h2>${PT(0)}
+  $('#view').innerHTML=`<h2>Профиль</h2>${PT(0)}${pfCard()}
   <div class="grid g2" style="margin-top:12px"><button class="btn gold" onclick="depSheet()">Пополнить</button><button class="btn ghost" onclick="wdSheet()">Вывести</button></div>
-  <button class="btn ${S.bonus_left?'ghost dis':''}" style="margin-top:10px" onclick="bonus()">🎅 ${S.bonus_left?'Бонус через '+fmt(S.bonus_left):'Забрать ежедневный бонус'}</button>
   ${tasksBtn(1)}
   <button class="btn ghost" style="margin-top:10px" onclick="openSettings()">⚙️ Настройки</button>
   <button class="btn ghost" style="margin-top:10px" onclick="fairSheet()">🔒 Честность игры (Provably Fair)</button>
@@ -921,7 +928,20 @@ async function tasksSheet(){
   <div class="grid" style="margin-top:14px">${!t.ok?'<p class="mu" style="text-align:center">⚠️ Сервис заданий временно недоступен</p>':todo.length?todo.map((x,i)=>`<button class="btn ghost" onclick="tkOpen(${i})">📢 ${x.n} · +${t.reward} ⭐</button>`).join(''):'<p class="mu" style="text-align:center">Сейчас новых заданий нет. Загляните позже!</p>'}
   <button class="btn gold" onclick="tasksSheet()">✅ Проверить задания</button></div>
   <div class="card" style="margin-top:14px"><div class="row"><span>Выполнено всего</span><b>${t.done}</b></div>${t.frac?`<div class="row"><span>Накоплено (до целой ⭐)</span><b>${+t.frac} ⭐</b></div>`:''}</div>`)}
-async function bonus(){if(S.bonus_left)return;try{const r=await api('bonus');hn('success');toast(`+${r.bonus} ⭐ бонус`,'ok');vMe()}catch(e){}}
+/* КАСТОМНЫЙ ПРОФИЛЬ: ник, аватар, цвет, титул */
+const PFC=[['#7c5cff','#ff5ca8'],['#2bd9a0','#18a4ff'],['#ffc24b','#ff6a3d'],['#ff4b6e','#b3125a'],['#18a4ff','#6a5cff'],['#9be15d','#00b09b'],['#c9d1e8','#6b7799'],['#ff9ff3','#a55eea']];
+const pfName=()=>{const p=S.pf||{},u=(tg.initDataUnsafe||{}).user||{};return p.n||u.first_name||'Игрок'};
+const pfCard=()=>{const p=S.pf||{c:0,t:0},c=PFC[p.c]||PFC[0],ti=(C.pf.titles[p.t]||C.pf.titles[0]);
+  return `<div class="card fi" style="margin-top:12px;display:flex;align-items:center;gap:14px;border:1px solid ${c[0]}88;background:linear-gradient(135deg,${c[0]}33,${c[1]}22)"><div style="width:64px;height:64px;border-radius:50%;display:grid;place-items:center;font-size:32px;background:linear-gradient(135deg,${c[0]},${c[1]});box-shadow:0 0 18px ${c[0]}88">${p.e||pfName()[0].toUpperCase()}</div><div style="flex:1;min-width:0"><div class="d" style="font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${pfName().replace(/[<>&]/g,'')}</div><div class="mu">${ti} · ${nf(S.u.balance)} ⭐</div></div><button class="btn ghost" style="width:auto;padding:8px 12px" onclick="pfSheet()">✏️</button></div>`};
+let PD=null;
+function pfSheet(){const p=PD=PD||{...(S.pf||{c:0,t:0,e:'',n:''})};
+  sheet(`<div class="d" style="font-size:16px;margin-bottom:10px">Мой профиль</div><input id="pfn" maxlength="16" placeholder="Ник (до 16 символов)" value="${(p.n||'').replace(/[<>&"]/g,'')}" oninput="PD.n=this.value">
+  <p class="mu" style="margin:10px 0 4px">Аватар</p><div style="display:flex;flex-wrap:wrap;gap:6px">${C.pf.emo.map(e=>`<button class="btn ${p.e===e?'gold':'ghost'}" style="width:44px;padding:8px 0;font-size:20px" onclick="pfPick('e','${e}')">${e}</button>`).join('')}</div>
+  <p class="mu" style="margin:10px 0 4px">Цвет</p><div style="display:flex;flex-wrap:wrap;gap:8px">${PFC.map((c,i)=>`<button onclick="pfPick('c',${i})" style="width:38px;height:38px;border-radius:50%;border:3px solid ${p.c===i?'#fff':'transparent'};background:linear-gradient(135deg,${c[0]},${c[1]})"></button>`).join('')}</div>
+  <p class="mu" style="margin:10px 0 4px">Титул</p><div style="display:flex;flex-wrap:wrap;gap:6px">${C.pf.titles.map((t,i)=>`<button class="btn ${p.t===i?'gold':'ghost'}" style="width:auto;padding:8px 12px" onclick="pfPick('t',${i})">${t}</button>`).join('')}</div>
+  <button class="btn gold" style="margin-top:14px" onclick="pfSave()">Сохранить</button>`)}
+function pfPick(k,v){PD[k]=v;hap('light');const n=$('#pfn');if(n)PD.n=n.value;pfSheet()}
+async function pfSave(){const n=$('#pfn');if(n)PD.n=n.value;try{await api('profile/set',{n:PD.n,e:PD.e,c:PD.c,t:PD.t});PD=null;closeSheet();toast('Профиль сохранён','ok');hn('success');vMe()}catch(e){}}
 function depSheet(mode){
   const cr=C.crypto&&C.crypto.on;mode=mode||'stars';
   const gt=`<button class="${mode==='gift'?'on':''}" onclick="depSheet('gift')">🎁 Подарок</button>`;

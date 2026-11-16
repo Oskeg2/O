@@ -397,6 +397,10 @@ CREATE TABLE IF NOT EXISTS live_drops(
 );
 CREATE INDEX IF NOT EXISTS live_drops_vis_idx ON live_drops(visible_at DESC);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS rare_drops INT NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS prof_name TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS prof_emoji TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS prof_color INT NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS prof_title INT NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS task_cents INT NOT NULL DEFAULT 0;   -- накопленные за задания сотые доли звезды (50 = 0.5 ⭐)
 CREATE TABLE IF NOT EXISTS hub_tasks(
     user_id BIGINT NOT NULL,
@@ -1158,7 +1162,7 @@ async def open_cases(uid: int, cid: str, n: int) -> list:
 
 # ── Ежедневный бесплатный кейс (шансы нигде не показываются) ──
 FREE_CASE_COOLDOWN_H = 24
-FREE_CASE_DROPS = [("s:0", 60), ("s:1", 20), ("s:5", 10), ("s:10", 10)]   # веса = проценты, сумма 100
+FREE_CASE_DROPS = [("s:0", 80), ("s:1", 15), ("s:5", 4), ("s:10", 1)]   # веса = проценты, сумма 100
 
 
 async def open_free_case(uid: int):

@@ -129,6 +129,10 @@ def setup(app: web.Application, bot, B):
         await take(con, uid, bet)
         return bet, False
 
+    PF_EMOJI = ["😎", "🦊", "🐱", "🐼", "🦁", "🐸", "🤖", "👾", "🦄", "🐉", "👑", "🔥", "💎", "🚀", "🎩", "🌙"]
+    PF_COLORS = 8                                     # палитры описаны на клиенте (индекс)
+    PF_TITLES = ["Новичок", "Коллекционер", "Везунчик", "Охотник за редкостью", "Хайроллер", "Легенда"]
+
     secret = hmac.new(b"WebAppData", B.BOT_TOKEN.encode(), hashlib.sha256).digest()
 
     def parse_user(request):
@@ -147,7 +151,6 @@ def setup(app: web.Application, bot, B):
         r = await B.pool.fetchrow(
             "SELECT u.*, "
             "(SELECT count(*) FROM users x WHERE x.ref_by = u.id) AS refs, "
-            "GREATEST(0, extract(epoch from (u.last_bonus + interval '24 hours' - now())))::int AS bonus_left, "
             "GREATEST(0, extract(epoch from (u.last_free_case + make_interval(hours => $2) - now())))::int AS free_left, "
             "COALESCE((SELECT json_object_agg(item, n) FROM (SELECT item, count(*) AS n FROM inventory "
             "          WHERE user_id = u.id GROUP BY item) i), '{}'::json) AS inv, "
@@ -175,7 +178,7 @@ def setup(app: web.Application, bot, B):
         ach = list(r["ach"]) + missing
         keys = ("balance", "total_dep", "cases_opened", "rare_drops", "mines_wins", "best_mines", "up_wins", "best_up")
         return {"id": uid, "u": {k: r[k] for k in keys}, "inv": inv, "mines": mines, "chick": chick, "tower": tower, "ach": ach,
-                "ach_new": new, "refs": r["refs"], "bonus_left": r["bonus_left"] or 0, "free_left": r["free_left"] or 0,
+                "ach_new": new, "refs": r["refs"], "pf": {"n": r["prof_name"] or "", "e": r["prof_emoji"] or "", "c": r["prof_color"], "t": r["prof_title"]}, "free_left": r["free_left"] or 0,
                 "fair": F.state_from_row(json.loads(r["fair"]) if r["fair"] else None)}
 
     _imgs = []
@@ -211,6 +214,8 @@ def setup(app: web.Application, bot, B):
             "tower": {"d": TOWER, "max": TOWER_MAX, "rtp": TOWER_RTP},
             "gift_to": B.GIFT_DEPOSIT_TO, "nft_x": NFT_PAY_X,
             "tasks": {"on": True, "reward": B.TASK_REWARD},
+            "free": [k for k, _ in B.FREE_CASE_DROPS],   # только список призов, без шансов
+            "pf": {"emo": PF_EMOJI, "col": PF_COLORS, "titles": PF_TITLES},
             "craft": {"min": CRAFT_MIN, "max": CRAFT_MAX, "rtp": CRAFT_RTP},
         }
 
@@ -290,16 +295,21 @@ def setup(app: web.Application, bot, B):
                           "new": st["new"], "gained": st["gained_cents"] / 100, "frac": st["frac_cents"] / 100,
                           "done": st["done_total"], "reward": B.TASK_REWARD}}
 
-    @route("bonus")
-    async def bonus(u, b):
-        amount = secrets.randbelow(5) + 1
-        got = await B.pool.fetchval(
-            "UPDATE users SET balance = balance + $2, last_bonus = now() "
-            "WHERE id=$1 AND (last_bonus IS NULL OR last_bonus < now() - interval '24 hours') RETURNING 1",
-            u["id"], amount)
-        if not got:
-            raise Err("Бонус ещё не доступен")
-        return {"bonus": amount}
+    @route("profile/set")
+    async def profile_set(u, b):
+        """Кастомизация профиля: ник, аватар-эмодзи, цвет и титул (всё из белого списка)."""
+        name = " ".join(str(b.get("n") or "").replace("<", "").replace(">", "").replace("&", "").split())[:16]
+        emo = str(b.get("e") or "")
+        emo = emo if emo in PF_EMOJI else ""
+        try:
+            col, ttl = int(b.get("c", 0)), int(b.get("t", 0))
+        except (TypeError, ValueError):
+            raise Err("Ошибка")
+        if not (0 <= col < PF_COLORS and 0 <= ttl < len(PF_TITLES)):
+            raise Err("Ошибка")
+        await B.pool.execute("UPDATE users SET prof_name=$2, prof_emoji=$3, prof_color=$4, prof_title=$5 WHERE id=$1",
+                             u["id"], name or None, emo or None, col, ttl)
+        return {}
 
     @route("case")
     async def case(u, b):
@@ -313,7 +323,7 @@ def setup(app: web.Application, bot, B):
 
     @route("case/free")
     async def case_free(u, b):
-        """Ежедневный бесплатный кейс: 0 ⭐ — 60%, 1 ⭐ — 20%, 5 ⭐ — 10%, 10 ⭐ — 10% (см. FREE_CASE_DROPS в bot.py)."""
+        """Ежедневный бесплатный кейс: 0 ⭐ — 80%, 1 ⭐ — 15%, 5 ⭐ — 4%, 10 ⭐ — 1% (см. FREE_CASE_DROPS в bot.py)."""
         bad = await B.missing_subs(bot, u["id"])
         if bad:
             return {"need_sub": [{"n": c["name"], "url": c["url"]} for c in bad]}
