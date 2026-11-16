@@ -47,7 +47,7 @@ ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split("
 PORT = int(os.getenv("PORT", "10000"))
 EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip()
 BOT_NAME = os.getenv("BOT_NAME", "Oskeg Case")
-MIN_DEPOSIT = int(os.getenv("MIN_DEPOSIT", "25"))
+MIN_DEPOSIT = int(os.getenv("MIN_DEPOSIT", "10"))
 MAX_DEPOSIT = int(os.getenv("MAX_DEPOSIT", "10000"))
 MIN_WITHDRAW = int(os.getenv("MIN_WITHDRAW", "50"))
 MIN_DEPOSIT_TO_WITHDRAW = int(os.getenv("MIN_DEPOSIT_TO_WITHDRAW", "0"))
@@ -65,7 +65,7 @@ CRYPTO_TOKEN = os.getenv("CRYPTO_PAY_TOKEN", "").strip()
 CRYPTO_API = os.getenv("CRYPTO_PAY_API", "https://pay.crypt.bot/api").rstrip("/")   # тест: https://testnet-pay.crypt.bot/api
 CRYPTO_ASSET = os.getenv("CRYPTO_ASSET", "USDT")
 CRYPTO_STARS_PER_USD = float(os.getenv("CRYPTO_STARS_PER_USD", "50"))   # сколько ⭐ начисляется за 1 USDT (50 => 100 ⭐ = 2 USDT)
-CRYPTO_MIN_DEPOSIT = int(os.getenv("CRYPTO_MIN_DEPOSIT", "25"))
+CRYPTO_MIN_DEPOSIT = int(os.getenv("CRYPTO_MIN_DEPOSIT", "10"))
 CRYPTO_MAX_DEPOSIT = int(os.getenv("CRYPTO_MAX_DEPOSIT", "1000000"))
 
 BOT_USERNAME = "Oskegcase"
@@ -267,7 +267,7 @@ SIDE = 4
 CELLS = SIDE * SIDE
 MINES_OPTIONS = [2, 3, 5, 8]
 UP_MULTS = {"1.5": 1.5, "2": 2.0, "3": 3.0, "5": 5.0, "10": 10.0, "20": 20.0}
-DEPOSIT_PRESETS = [50, 100, 250, 500, 1000]
+DEPOSIT_PRESETS = [10, 50, 100, 250, 500, 1000]
 
 
 def drop_value(key: str) -> int:
@@ -849,7 +849,8 @@ async def botohub_tasks(uid: int) -> list:
 # (сотые доли звезды), а каждая накопленная целая звезда переходит на баланс. За одну и ту же ссылку платим один раз (hub_tasks).
 TASK_REWARD = float(os.getenv("TASK_REWARD", "0.5"))
 TASK_CENTS = max(1, round(TASK_REWARD * 100))
-TASKS_ON = bool(BOTOHUB_TOKEN)
+TASKS_ON = True                      # кнопка «Задания» видна всегда
+TASKS_READY = bool(BOTOHUB_TOKEN)    # сами задания работают, только если задан BOTOHUB_TOKEN (BotoHub)
 
 
 def fmt_stars(cents: int) -> str:
@@ -859,6 +860,8 @@ def fmt_stars(cents: int) -> str:
 async def tasks_sync(uid: int) -> dict:
     """Синхронизация заданий игрока с BotoHub + начисление наград.
     Возвращает: ok, tasks=[{name,url,paid}], new (сколько заданий засчитано сейчас), gained_cents, frac_cents, done_total."""
+    if not TASKS_READY:                  # токена BotoHub нет — кнопка видна, но список заданий пуст
+        return {"ok": False, "tasks": [], "new": 0, "gained_cents": 0, "frac_cents": 0, "done_total": 0}
     ok, _completed, links = await botohub_fetch(uid)
     new_n = gained = 0
     paid_urls: set = set()
@@ -955,9 +958,6 @@ def tasks_view(st: dict):
 
 @r.callback_query(F.data == "tasks")
 async def cb_tasks(cb: CallbackQuery):
-    if not TASKS_ON:
-        await cb.answer("Задания пока недоступны", show_alert=True)
-        return
     st = await tasks_sync(cb.from_user.id)
     if st["new"]:
         await cb.answer(f"✅ Засчитано заданий: {st['new']}. +{fmt_stars(st['gained_cents'])} ⭐", show_alert=True)
