@@ -802,7 +802,7 @@ def _parse_channels(raw: str) -> list:
     return out
 
 
-SUB_CHANNELS = _parse_channels(os.getenv("SUB_CHANNELS", ""))
+SUB_CHANNELS = _parse_channels(os.getenv("SUB_CHANNELS", "@tgk_oskegcase"))   # обязательная подписка при /start и для бесплатного кейса
 
 
 BOTOHUB_TOKEN = os.getenv("BOTOHUB_TOKEN", "").strip()      # токен из https://botohub.me/integration (заголовок Auth)
@@ -867,7 +867,7 @@ def fmt_stars(cents: int) -> str:
     return f"{cents / 100:g}"
 
 
-async def tasks_sync(uid: int) -> dict:
+async def _hub_sync(uid: int) -> dict:
     """Синхронизация заданий игрока с BotoHub + начисление наград.
     Возвращает: ok, tasks=[{name,url,paid}], new (сколько заданий засчитано сейчас), gained_cents, frac_cents, done_total."""
     if not TASKS_READY:                  # токена BotoHub нет — кнопка видна, но список заданий пуст
@@ -910,14 +910,66 @@ async def tasks_sync(uid: int) -> dict:
     return {"ok": ok, "why": "" if ok else "down", "err": BH_LAST, "tasks": tasks, "new": new_n, "gained_cents": gained, "frac_cents": frac, "done_total": done_total}
 
 
+# ── Свои задания (не зависят от BotoHub): канал @buvego — подписка (бот должен быть админом канала) ──
+LOCAL_TASKS = [
+    {"url": "https://t.me/buvego", "name": "@buvego", "kind": "sub", "chat": "@buvego"},
+]
+
+
+async def tasks_sync(uid: int, bot=None, claim: bool = False, opened=()) -> dict:
+    """Свои задания + BotoHub. sub — проверяем подписку; start — засчитываем при «Проверить», если игрок открыл ссылку."""
+    urls = [t["url"] for t in LOCAL_TASKS]
+    async with pool.acquire() as con:
+        done = {x["url"] for x in await con.fetch(
+            "SELECT url FROM hub_tasks WHERE user_id=$1 AND status='done' AND url = ANY($2::text[])", uid, urls)}
+    new_n = gained = 0
+    for t in LOCAL_TASKS:
+        if t["url"] in done:
+            continue
+        good = False
+        if t["kind"] == "sub" and bot is not None:
+            try:
+                m = await bot.get_chat_member(t["chat"], uid)
+                good = m.status not in ("left", "kicked") and not (m.status == "restricted" and not getattr(m, "is_member", True))
+            except Exception as e:
+                log.warning("Задание %s: проверка подписки не удалась (бот должен быть админом канала): %s", t["chat"], e)
+        elif t["kind"] == "start" and claim and t["url"] in set(opened):
+            good = True
+        if not good:
+            continue
+        async with pool.acquire() as con:
+            async with con.transaction():
+                await con.execute("SELECT 1 FROM users WHERE id=$1 FOR UPDATE", uid)
+                got = await con.fetchval(
+                    "INSERT INTO hub_tasks(user_id, url, status, done_at) VALUES($1,$2,'done',now()) "
+                    "ON CONFLICT (user_id, url) DO UPDATE SET status='done', done_at=now() "
+                    "WHERE hub_tasks.status <> 'done' RETURNING 1", uid, t["url"])
+                if got:
+                    cents = await con.fetchval(
+                        "UPDATE users SET task_cents = task_cents + $2::int WHERE id=$1 RETURNING task_cents", uid, TASK_CENTS)
+                    stars = cents // 100
+                    if stars:
+                        await con.execute(
+                            "UPDATE users SET balance = balance + $2::bigint, task_cents = task_cents - ($2::bigint * 100)::int WHERE id=$1",
+                            uid, stars)
+                    new_n += 1
+                    gained += TASK_CENTS
+                    done.add(t["url"])
+    st = await _hub_sync(uid)
+    local = [{"name": t["name"], "url": t["url"], "paid": t["url"] in done} for t in LOCAL_TASKS]
+    st["tasks"] = local + st["tasks"]
+    st["new"] += new_n
+    st["gained_cents"] += gained
+    st["ok"] = True          # свои задания работают всегда
+    return st
+
+
 async def missing_subs(bot: Bot, uid: int) -> list:
     """Каналы, на которые игрок ещё НЕ подписан (BotoHub, а если токена нет — SUB_CHANNELS). Пусто = всё выполнено."""
-    if BOTOHUB_TOKEN:
-        return await botohub_tasks(uid)
+    bad = list(await botohub_tasks(uid)) if BOTOHUB_TOKEN else []
     if not SUB_CHANNELS:
-        return []
+        return bad
     res = await asyncio.gather(*[bot.get_chat_member(c["chat"], uid) for c in SUB_CHANNELS], return_exceptions=True)
-    bad = []
     for c, m in zip(SUB_CHANNELS, res):
         if isinstance(m, Exception):
             log.warning("Проверка подписки на %s не удалась (бот должен быть админом канала): %s", c["chat"], m)
@@ -969,7 +1021,7 @@ def tasks_view(st: dict):
 
 @r.callback_query(F.data == "tasks")
 async def cb_tasks(cb: CallbackQuery):
-    st = await tasks_sync(cb.from_user.id)
+    st = await tasks_sync(cb.from_user.id, cb.bot, True, [t["url"] for t in LOCAL_TASKS])
     if st["new"]:
         await cb.answer(f"✅ Засчитано заданий: {st['new']}. +{fmt_stars(st['gained_cents'])} ⭐", show_alert=True)
     else:

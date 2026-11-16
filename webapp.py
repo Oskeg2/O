@@ -290,7 +290,7 @@ def setup(app: web.Application, bot, B):
     @route("tasks")
     async def tasks(u, b):
         """Задания BotoHub: показать список и засчитать выполненные (+TASK_REWARD ⭐ за каждое)."""
-        st = await B.tasks_sync(u["id"])
+        st = await B.tasks_sync(u["id"], bot, bool(b.get("claim")), [str(x) for x in (b.get("opened") or [])][:10])
         return {"tasks": {"on": True, "ok": st["ok"], "why": st.get("why", ""), "err": st.get("err", ""), "list": [{"n": t["name"], "url": t["url"], "paid": t["paid"]} for t in st["tasks"]],
                           "new": st["new"], "gained": st["gained_cents"] / 100, "frac": st["frac_cents"] / 100,
                           "done": st["done_total"], "reward": B.TASK_REWARD}}

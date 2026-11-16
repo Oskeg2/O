@@ -917,16 +917,16 @@ async function fairRot(){try{await api('fair/rotate',{client:$('#fcs').value.tri
 async function fairChk(){const p=S.fair.prev,o=await pfv(p.seed,p.client,+$('#fn').value,Math.max(2,+$('#fm').value|0),10);$('#fo').textContent=o.join(', ')}
 /* ЗАДАНИЯ (BotoHub): +награда ⭐ за каждое выполненное задание */
 const tasksBtn=m=>C.tasks&&C.tasks.on?`<button class="btn ${m?'ghost':'gold'}" style="margin:${m?'10px 0 0':'0 0 14px'}" onclick="tasksSheet()">📋 Задания · +${C.tasks.reward} ⭐ за каждое</button>`:'';
-let TK=[];
-function tkOpen(i){const u=TK[i];if(!u)return;tg.openTelegramLink&&/^https:\/\/t\.me\//.test(u)?tg.openTelegramLink(u):window.open(u,'_blank')}
-async function tasksSheet(){
-  let r;try{r=await api('tasks')}catch(e){return}
+let TK=[];const TKO=new Set();
+function tkOpen(i){const u=TK[i];if(!u)return;TKO.add(u);tg.openTelegramLink&&/^https:\/\/t\.me\//.test(u)?tg.openTelegramLink(u):window.open(u,'_blank')}
+async function tasksSheet(claim){
+  let r;try{r=await api('tasks',{claim:!!claim,opened:[...TKO]})}catch(e){return}
   const t=r.tasks;if(!t.on)return;
   if(t.new){hn('success');toast(`✅ Засчитано: ${t.new} · +${+t.gained} ⭐`,'ok');paintBal()}
   const todo=t.list.filter(x=>!x.paid);TK=todo.map(x=>x.url);
   sheet(`<div style="text-align:center"><div style="font-size:46px">📋</div><div class="d" style="font-size:16px;margin:6px 0">Задания</div><p class="mu">Подпишитесь на канал или бота и нажмите «Проверить» — за каждое задание <b>+${t.reward} ⭐</b></p></div>
   <div class="grid" style="margin-top:14px">${!t.ok?`<p class="mu" style="text-align:center">${t.why==='no_token'?'⚙️ Задания не подключены: добавьте BOTOHUB_TOKEN в переменные сервиса и перезапустите':'⚠️ BotoHub не ответил, попробуйте позже'}</p><p class="mu" style="text-align:center;font-size:11px;word-break:break-all">${(t.err||'').replace(/[<>&]/g,'')}</p>`:todo.length?todo.map((x,i)=>`<button class="btn ghost" onclick="tkOpen(${i})">📢 ${x.n} · +${t.reward} ⭐</button>`).join(''):`<p class="mu" style="text-align:center">Сейчас новых заданий нет. Загляните позже!</p><p class="mu" style="text-align:center;font-size:11px;word-break:break-all">${(t.err||'').replace(/[<>&]/g,'')}</p>`}
-  <button class="btn gold" onclick="tasksSheet()">✅ Проверить задания</button></div>
+  <button class="btn gold" onclick="tasksSheet(true)">✅ Проверить задания</button></div>
   <div class="card" style="margin-top:14px"><div class="row"><span>Выполнено всего</span><b>${t.done}</b></div>${t.frac?`<div class="row"><span>Накоплено (до целой ⭐)</span><b>${+t.frac} ⭐</b></div>`:''}</div>`)}
 /* КАСТОМНЫЙ ПРОФИЛЬ: ник, аватар, цвет, титул */
 const PFC=[['#7c5cff','#ff5ca8'],['#2bd9a0','#18a4ff'],['#ffc24b','#ff6a3d'],['#ff4b6e','#b3125a'],['#18a4ff','#6a5cff'],['#9be15d','#00b09b'],['#c9d1e8','#6b7799'],['#ff9ff3','#a55eea']];
