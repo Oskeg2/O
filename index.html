@@ -369,6 +369,10 @@ html.scrolling .case .em,html.scrolling .case .cart *,html.scrolling .aur,html.s
   background:linear-gradient(90deg,color-mix(in srgb,var(--bg2) 84%,transparent) calc(50% + var(--wo,0px) - var(--tw)*.58),transparent calc(50% + var(--wo,0px) - var(--tw)*.58),transparent calc(50% + var(--wo,0px) + var(--tw)*.58),color-mix(in srgb,var(--bg2) 84%,transparent) calc(50% + var(--wo,0px) + var(--tw)*.58))}
 .mrow.stop{border-color:var(--rc);box-shadow:0 0 0 1px var(--rc),0 0 22px -6px var(--rc)}.mrow.stop:after{opacity:1}
 .mrow .mark{z-index:3}
+/* плотный режим (6+ рулеток): меньше слоёв на ряд, иначе Android-WebView теряет часть рядов */
+.m-s .mrow{animation:none;transition:none}
+.m-s .mrow:before,.m-s .mrow:after{display:none}
+.m-s .mrow .it.hit:after{display:none!important}
 .mrow .strip{gap:6px;padding:0;height:100%;align-items:center;backface-visibility:visible!important;-webkit-backface-visibility:visible!important}
 .mrow .it{flex:0 0 var(--tw);height:calc(var(--rh) - 14px);padding:3px 2px;display:flex;flex-direction:column;justify-content:center;border-radius:12px}
 .mrow .it:after{display:none}
@@ -475,8 +479,8 @@ html[data-q=low] .case,html[data-q=low] .card{background-image:none}
 .wheel{filter:none!important}
 .wheel.spin .ring{animation:rgpulse .6s ease-in-out infinite alternate}
 @keyframes rgpulse{to{opacity:.7}}
-.wheel.win{animation:wwin .7s var(--spring)}.wheel.win .ring{box-shadow:0 0 36px 4px rgba(61,220,151,.85)}
-.wheel.lose{animation:wlose .5s}.wheel.lose .ring{box-shadow:0 0 30px 3px rgba(255,92,108,.8)}
+.wheel.wok{animation:wwin .7s var(--spring)}.wheel.wok .ring{box-shadow:0 0 36px 4px rgba(61,220,151,.85)}
+.wheel.wbad{animation:wlose .5s}.wheel.wbad .ring{box-shadow:0 0 30px 3px rgba(255,92,108,.8)}
 @keyframes wwin{40%{transform:scale(1.12)}}
 @keyframes wlose{20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}
 .wc{animation:wcb 3s ease-in-out infinite}@keyframes wcb{50%{transform:scale(1.05)}}
@@ -709,7 +713,7 @@ async function openCase(id,n){
   paintBal();try{await api('feed/reveal',{},false,true)}catch(e){}busy=false;render();lfPoll()}
 /* МУЛЬТИ-ОТКРЫТИЕ: на каждый кейс своя рулетка, все крутятся одновременно */
 async function multiSpin(id,ds,title){
-  const n=ds.length,pool=C.cases[id].drops,tot=pool.reduce((a,d)=>a+d[1],0),T=n>=6?18:n>=3?24:34,N=T+8,GAP=6; /* чем больше рулеток, тем короче лента: иначе Android не хватает видеопамяти и часть рядов пропадает */
+  const n=ds.length,pool=C.cases[id].drops,tot=pool.reduce((a,d)=>a+d[1],0),T=n>=8?14:n>=6?18:n>=3?24:34,N=T+8,GAP=6; /* чем больше рулеток, тем короче лента: иначе Android не хватает видеопамяти и часть рядов пропадает */
   const pick=()=>{let r=Math.random()*tot;for(const d of pool){if((r-=d[1])<0)return info(d[0])}return info(pool[0][0])};
   const cs=getComputedStyle(document.documentElement),cc={};const col=d=>cc[d.r]||(cc[d.r]=cs.getPropertyValue(RC[d.r]).trim());
   const rh=Math.max(48,Math.min(112,Math.floor((innerHeight-150-(n-1)*6)/n))),tw=rh<70?rh:Math.round(rh*.94),stride=tw+GAP;
@@ -833,9 +837,9 @@ async function upGo(fast){
   busy=true;let r;
   try{r=d[0]==='i'?await api('up/item',{mode,ref,dst:d.slice(2)},true):await api('up',{mode,ref,mult:d.slice(2)},true)}catch(e){busy=false;return}
   const p=$('#ptr'),deg=ch*360,a=r.win?deg*(.08+Math.random()*.84):deg+(360-deg)*(.06+Math.random()*.88);
-  const T=fast?1.3:4.4,wh=$('.wheel');wh.classList.remove('win','lose');wh.classList.add('spin');p.style.transition='none';p.style.transform='rotate(0)';p.getBoundingClientRect();p.style.transition=`transform ${T}s cubic-bezier(.12,.7,.1,1)`;p.style.transform=`rotate(${360*(fast?3:6)+a}deg)`;
+  const T=fast?1.3:4.4,wh=$('.wheel');wh.classList.remove('wok','wbad');wh.classList.add('spin');p.style.transition='none';p.style.transform='rotate(0)';p.getBoundingClientRect();p.style.transition=`transform ${T}s cubic-bezier(.12,.7,.1,1)`;p.style.transform=`rotate(${360*(fast?3:6)+a}deg)`;
   let i=0;const iv=setInterval(()=>{hap('light');if(++i>26)clearInterval(iv)},fast?60:150);
-  await sleep(T*1000+100);clearInterval(iv);wh.classList.remove('spin');wh.classList.add(r.win?'win':'lose');paintBal();
+  await sleep(T*1000+100);clearInterval(iv);wh.classList.remove('spin');wh.classList.add(r.win?'wok':'wbad');paintBal();
   if(r.win){hn('success');if(d[0]==='i'){if(!fast)await reveal([info(d)]);toast('Подарок на складе','ok')}else{burst('#3ddc97');toast(`Успех! +${r.payout} ⭐`,'ok')}}
   else{hn('error');toast(mode==='b'?`Неудача −${v} ⭐`:'Неудача — подарок сгорел','err')}
   await sleep(fast?450:800);busy=false;if(mode==='i'&&!S.inv[sub.ref])sub.ref='';sub.dst='';vUp()}
