@@ -671,7 +671,7 @@ function caseArt2(c,i,big){
 function vCases(){
   if(sub.case)return vCase(sub.case);
   const fl=S.free_left||0;
-  $('#view').innerHTML='<h2 class="fi">Кейсы</h2><div class="card fi" style="margin-bottom:14px;text-align:center"><div style="font-size:34px">🎁</div><div class="d" style="font-size:16px;margin:4px 0">Бесплатный кейс</div><p class="mu" style="margin:0 0 10px">Раз в 24 часа</p><button class="btn '+(fl?'ghost dis':'gold')+'" onclick="openFree()">'+(fl?'Откроется через '+fmt(fl):'Открыть бесплатно')+'</button></div><div class="grid g2">'+caseList().map(([id,c],i)=>{const n=c.name.split(' ').slice(1),t=palOf(c,i);
+  $('#view').innerHTML='<h2 class="fi">Кейсы</h2>'+tasksBtn()+'<div class="card fi" style="margin-bottom:14px;text-align:center"><div style="font-size:34px">🎁</div><div class="d" style="font-size:16px;margin:4px 0">Бесплатный кейс</div><p class="mu" style="margin:0 0 10px">Раз в 24 часа</p><button class="btn '+(fl?'ghost dis':'gold')+'" onclick="openFree()">'+(fl?'Откроется через '+fmt(fl):'Открыть бесплатно')+'</button></div><div class="grid g2">'+caseList().map(([id,c],i)=>{const n=c.name.split(' ').slice(1),t=palOf(c,i);
     return`<div class="case cc fi" style="--gl:${t[0]};--c1:${t[0]};--i:${i+1}" onclick="sub.case='${id}';render()">${caseArt2(c,i)}<div class="cc-foot"><div class="nm">${n.join(' ')}</div><div class="pr">${nf(c.price)} ⭐</div></div></div>`}).join('')+'</div><p class="mu" style="margin-top:16px;text-align:center">Выбей подарок и забери его себе или продай за звёзды</p>'}
 function vCase(id){
   const c=C.cases[id],i=caseIdx(id),[em,...nm]=c.name.split(' '),t=palOf(c,i),nn=curN(),ds=c.drops.map(d=>({...info(d[0]),p:d[1]})).sort((a,b)=>b.v-a.v);
@@ -886,6 +886,7 @@ function vMe(){
   $('#view').innerHTML=`<h2>Профиль</h2>${PT(0)}
   <div class="grid g2" style="margin-top:12px"><button class="btn gold" onclick="depSheet()">Пополнить</button><button class="btn ghost" onclick="wdSheet()">Вывести</button></div>
   <button class="btn ${S.bonus_left?'ghost dis':''}" style="margin-top:10px" onclick="bonus()">🎅 ${S.bonus_left?'Бонус через '+fmt(S.bonus_left):'Забрать ежедневный бонус'}</button>
+  ${tasksBtn(1)}
   <button class="btn ghost" style="margin-top:10px" onclick="openSettings()">⚙️ Настройки</button>
   <button class="btn ghost" style="margin-top:10px" onclick="fairSheet()">🔒 Честность игры (Provably Fair)</button>
   <h3>Статистика</h3><div class="card"><div class="row"><span>Кейсов открыто</span><b>${u.cases_opened}</b></div><div class="row"><span>Редких находок</span><b>${u.rare_drops}</b></div><div class="row"><span>Побед в сапёре</span><b>${u.mines_wins} · x${(+u.best_mines).toFixed(1)}</b></div><div class="row"><span>Побед в апгрейде</span><b>${u.up_wins} · x${(+u.best_up).toFixed(2)}</b></div><div class="row"><span>Пополнено всего</span><b>${u.total_dep} ⭐</b></div></div>
@@ -907,6 +908,19 @@ function fairSheet(){const f=S.fair,p=f.prev,e=t=>String(t).replace(/[<>&"]/g,''
   <p class="mu">Числа — randbelow(n) подряд для nonce. Кости: n=10000, бросок=число/100. Монетка: n=1000, выигрыш если &lt;485. Колесо: n=12, индекс сектора. Плинко: n=2 ×10, 1 = вправо. Апгрейд: n=10000, выигрыш если &lt;шанс×10000. Кейс: n=сумма весов. Сапёр: перемешивание Фишера–Йейтса от n=25. Ракета: seed раунда, client=«crash», nonce=№ раунда, n=10⁹.</p>`:''}`)}
 async function fairRot(){try{await api('fair/rotate',{client:$('#fcs').value.trim()});toast('Seed раскрыт, выдан новый','ok');fairSheet()}catch(e){}}
 async function fairChk(){const p=S.fair.prev,o=await pfv(p.seed,p.client,+$('#fn').value,Math.max(2,+$('#fm').value|0),10);$('#fo').textContent=o.join(', ')}
+/* ЗАДАНИЯ (BotoHub): +награда ⭐ за каждое выполненное задание */
+const tasksBtn=m=>C.tasks&&C.tasks.on?`<button class="btn ${m?'ghost':'gold'}" style="margin:${m?'10px 0 0':'0 0 14px'}" onclick="tasksSheet()">📋 Задания · +${C.tasks.reward} ⭐ за каждое</button>`:'';
+let TK=[];
+function tkOpen(i){const u=TK[i];if(!u)return;tg.openTelegramLink&&/^https:\/\/t\.me\//.test(u)?tg.openTelegramLink(u):window.open(u,'_blank')}
+async function tasksSheet(){
+  let r;try{r=await api('tasks')}catch(e){return}
+  const t=r.tasks;if(!t.on)return;
+  if(t.new){hn('success');toast(`✅ Засчитано: ${t.new} · +${+t.gained} ⭐`,'ok');paintBal()}
+  const todo=t.list.filter(x=>!x.paid);TK=todo.map(x=>x.url);
+  sheet(`<div style="text-align:center"><div style="font-size:46px">📋</div><div class="d" style="font-size:16px;margin:6px 0">Задания</div><p class="mu">Подпишитесь на канал или бота и нажмите «Проверить» — за каждое задание <b>+${t.reward} ⭐</b></p></div>
+  <div class="grid" style="margin-top:14px">${!t.ok?'<p class="mu" style="text-align:center">⚠️ Сервис заданий временно недоступен</p>':todo.length?todo.map((x,i)=>`<button class="btn ghost" onclick="tkOpen(${i})">📢 ${x.n} · +${t.reward} ⭐</button>`).join(''):'<p class="mu" style="text-align:center">Сейчас новых заданий нет. Загляните позже!</p>'}
+  <button class="btn gold" onclick="tasksSheet()">✅ Проверить задания</button></div>
+  <div class="card" style="margin-top:14px"><div class="row"><span>Выполнено всего</span><b>${t.done}</b></div>${t.frac?`<div class="row"><span>Накоплено (до целой ⭐)</span><b>${+t.frac} ⭐</b></div>`:''}</div>`)}
 async function bonus(){if(S.bonus_left)return;try{const r=await api('bonus');hn('success');toast(`+${r.bonus} ⭐ бонус`,'ok');vMe()}catch(e){}}
 function depSheet(mode){
   const cr=C.crypto&&C.crypto.on;mode=mode||'stars';

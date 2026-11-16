@@ -397,6 +397,15 @@ CREATE TABLE IF NOT EXISTS live_drops(
 );
 CREATE INDEX IF NOT EXISTS live_drops_vis_idx ON live_drops(visible_at DESC);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS rare_drops INT NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS task_cents INT NOT NULL DEFAULT 0;   -- накопленные за задания сотые доли звезды (50 = 0.5 ⭐)
+CREATE TABLE IF NOT EXISTS hub_tasks(
+    user_id BIGINT NOT NULL,
+    url TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'shown',   -- shown = показано, done = выполнено и оплачено
+    shown_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    done_at TIMESTAMPTZ,
+    PRIMARY KEY (user_id, url)
+);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS mines_wins INT NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS best_mines DOUBLE PRECISION NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS up_wins INT NOT NULL DEFAULT 0;
@@ -739,7 +748,7 @@ def main_kb() -> InlineKeyboardMarkup:
         [btn("🚀 Апгрейдер", "up"), btn("🎒 Инвентарь", "inv")],
         [btn("💳 Пополнить", "dep"), btn("💸 Вывод", "wd")],
         [btn("🎅 Бонус", "bonus"), btn("👤 Профиль", "profile")],
-        [btn("🏆 Достижения", "ach")],
+        [btn("🏆 Достижения", "ach")] + ([btn(f"📋 Задания +{fmt_stars(TASK_CENTS)} ⭐", "tasks")] if TASKS_ON else []),
     ])
 
 
@@ -803,8 +812,8 @@ def _sponsor_name(url: str, i: int) -> str:
     return "@" + tail if tail and not tail.startswith("+") and tail.replace("_", "").isalnum() else f"Спонсор {i}"
 
 
-async def botohub_tasks(uid: int) -> list:
-    """Невыполненные задания BotoHub для игрока: [{'name','url'}]. Пустой список = можно пускать дальше (всё выполнено / спонсоров нет / сервис недоступен)."""
+async def botohub_fetch(uid: int):
+    """Запрос к BotoHub. Возвращает (ok, completed, links): ok=False — сервис недоступен/ошибка, completed — игрок выполнил всё."""
     global _bh_session
     if _bh_session is None or _bh_session.closed:
         _bh_session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8))
@@ -814,14 +823,77 @@ async def botohub_tasks(uid: int) -> list:
             data = await resp.json(content_type=None)
             if resp.status != 200:
                 log.warning("BotoHub HTTP %s: %s", resp.status, data)
-                return []
+                return False, False, []
     except Exception as e:
         log.warning("BotoHub недоступен: %s", e)
-        return []
+        return False, False, []
+    if not isinstance(data, dict):
+        return False, False, []
     if data.get("completed") or data.get("skip"):
-        return []
+        return True, True, []
     links = [str(x).replace("https://telegram.me/", "https://t.me/") for x in (data.get("tasks") or [])]
+    return True, False, links
+
+
+async def botohub_tasks(uid: int) -> list:
+    """Невыполненные задания BotoHub для игрока: [{'name','url'}]. Пустой список = можно пускать дальше (всё выполнено / спонсоров нет / сервис недоступен)."""
+    ok, _done, links = await botohub_fetch(uid)
+    if not ok:
+        return []
     return [{"url": u, "name": _sponsor_name(u, i + 1)} for i, u in enumerate(links)]
+
+
+# ───────────────────────── ЗАДАНИЯ ОТ BOTOHUB (+0.5 ⭐ за задание) ─────────────────────────
+# Раздел «Задания»: бот берёт задания у BotoHub и показывает их игроку. Выполнил (подписался) — задание пропало из выдачи BotoHub,
+# значит оно засчитано: игрок получает TASK_REWARD ⭐. Баланс у нас целый, поэтому дробная часть копится в users.task_cents
+# (сотые доли звезды), а каждая накопленная целая звезда переходит на баланс. За одну и ту же ссылку платим один раз (hub_tasks).
+TASK_REWARD = float(os.getenv("TASK_REWARD", "0.5"))
+TASK_CENTS = max(1, round(TASK_REWARD * 100))
+TASKS_ON = bool(BOTOHUB_TOKEN)
+
+
+def fmt_stars(cents: int) -> str:
+    return f"{cents / 100:g}"
+
+
+async def tasks_sync(uid: int) -> dict:
+    """Синхронизация заданий игрока с BotoHub + начисление наград.
+    Возвращает: ok, tasks=[{name,url,paid}], new (сколько заданий засчитано сейчас), gained_cents, frac_cents, done_total."""
+    ok, _completed, links = await botohub_fetch(uid)
+    new_n = gained = 0
+    paid_urls: set = set()
+    async with pool.acquire() as con:
+        async with con.transaction():
+            await con.execute("SELECT 1 FROM users WHERE id=$1 FOR UPDATE", uid)
+            if ok:
+                shown = {x["url"] for x in await con.fetch(
+                    "SELECT url FROM hub_tasks WHERE user_id=$1 AND status='shown'", uid)}
+                finished = list(shown - set(links))          # было показано, а в выдаче BotoHub его больше нет = выполнено
+                if finished:
+                    await con.execute(
+                        "UPDATE hub_tasks SET status='done', done_at=now() "
+                        "WHERE user_id=$1 AND status='shown' AND url = ANY($2::text[])", uid, finished)
+                    new_n = len(finished)
+                    gained = new_n * TASK_CENTS
+                    cents = await con.fetchval(
+                        "UPDATE users SET task_cents = task_cents + $2::int WHERE id=$1 RETURNING task_cents", uid, gained)
+                    stars = cents // 100
+                    if stars:
+                        await con.execute(
+                            "UPDATE users SET balance = balance + $2::bigint, task_cents = task_cents - ($2::bigint * 100)::int WHERE id=$1",
+                            uid, stars)
+                if links:
+                    await con.execute(
+                        "INSERT INTO hub_tasks(user_id, url) SELECT $1::bigint, x FROM unnest($2::text[]) x "
+                        "ON CONFLICT DO NOTHING", uid, links)
+                    paid_urls = {x["url"] for x in await con.fetch(
+                        "SELECT url FROM hub_tasks WHERE user_id=$1 AND status='done' AND url = ANY($2::text[])",
+                        uid, links)}
+            frac = await con.fetchval("SELECT task_cents FROM users WHERE id=$1", uid) or 0
+            done_total = await con.fetchval(
+                "SELECT count(*) FROM hub_tasks WHERE user_id=$1 AND status='done'", uid) or 0
+    tasks = [{"name": _sponsor_name(u, i + 1), "url": u, "paid": u in paid_urls} for i, u in enumerate(links)]
+    return {"ok": ok, "tasks": tasks, "new": new_n, "gained_cents": gained, "frac_cents": frac, "done_total": done_total}
 
 
 async def missing_subs(bot: Bot, uid: int) -> list:
@@ -859,6 +931,40 @@ async def cb_gate_check(cb: CallbackQuery):
     await pool.execute("UPDATE users SET gate_passed = true WHERE id=$1", cb.from_user.id)
     await cb.answer("✅ Готово!")
     await show(cb, await menu_text(cb.from_user.id), main_kb())
+
+
+def tasks_view(st: dict):
+    """Текст и клавиатура раздела «Задания» для бота."""
+    todo = [t for t in st["tasks"] if not t["paid"]]
+    lines = ["📋 <b>Задания</b>", "", f"За каждое выполненное задание — <b>+{fmt_stars(TASK_CENTS)} ⭐</b>.",
+             "Подпишитесь на канал/бота из списка и нажмите «Проверить»."]
+    if not st["ok"]:
+        lines += ["", "⚠️ Сервис заданий временно недоступен, попробуйте позже."]
+    elif todo:
+        lines += ["", f"Доступно заданий: <b>{len(todo)}</b>"]
+    else:
+        lines += ["", "✅ Сейчас новых заданий нет. Загляните позже!"]
+    if st["frac_cents"]:
+        lines += ["", f"💫 Накоплено: {fmt_stars(st['frac_cents'])} ⭐ (до зачисления на баланс нужна 1 ⭐)"]
+    lines.append(f"Выполнено всего: {st['done_total']}")
+    rows = [[InlineKeyboardButton(text=f"📢 {t['name']}  +{fmt_stars(TASK_CENTS)} ⭐", url=t["url"])] for t in todo]
+    rows.append([btn("✅ Проверить задания", "tasks")])
+    rows.append(BACK_ROW)
+    return "\n".join(lines), kb(rows)
+
+
+@r.callback_query(F.data == "tasks")
+async def cb_tasks(cb: CallbackQuery):
+    if not TASKS_ON:
+        await cb.answer("Задания пока недоступны", show_alert=True)
+        return
+    st = await tasks_sync(cb.from_user.id)
+    if st["new"]:
+        await cb.answer(f"✅ Засчитано заданий: {st['new']}. +{fmt_stars(st['gained_cents'])} ⭐", show_alert=True)
+    else:
+        await cb.answer()
+    text, markup = tasks_view(st)
+    await show(cb, text + f"\n\n💰 Баланс: <b>{await get_balance(cb.from_user.id)} ⭐</b>", markup)
 
 
 # ───────────────────────── /start, меню, профиль, бонус ─────────────────────────

@@ -210,6 +210,7 @@ def setup(app: web.Application, bot, B):
             "plinko": {"rows": PLINKO_ROWS, "m": PLINKO, "rtp": PLINKO_RTP},
             "tower": {"d": TOWER, "max": TOWER_MAX, "rtp": TOWER_RTP},
             "gift_to": B.GIFT_DEPOSIT_TO, "nft_x": NFT_PAY_X,
+            "tasks": {"on": B.TASKS_ON, "reward": B.TASK_REWARD},
             "craft": {"min": CRAFT_MIN, "max": CRAFT_MAX, "rtp": CRAFT_RTP},
         }
 
@@ -280,6 +281,16 @@ def setup(app: web.Application, bot, B):
                 if not await F.rotate(con, u["id"], (str(b.get("client") or "oskeg").strip() or "oskeg")[:32]):
                     raise Err("Сначала завершите текущую игру (Сапёр/Курочка/Башня)")
         return {}
+
+    @route("tasks")
+    async def tasks(u, b):
+        """Задания BotoHub: показать список и засчитать выполненные (+TASK_REWARD ⭐ за каждое)."""
+        if not B.TASKS_ON:
+            return {"tasks": {"on": False, "list": [], "new": 0, "gained": 0, "frac": 0, "done": 0, "reward": B.TASK_REWARD}}
+        st = await B.tasks_sync(u["id"])
+        return {"tasks": {"on": True, "ok": st["ok"], "list": [{"n": t["name"], "url": t["url"], "paid": t["paid"]} for t in st["tasks"]],
+                          "new": st["new"], "gained": st["gained_cents"] / 100, "frac": st["frac_cents"] / 100,
+                          "done": st["done_total"], "reward": B.TASK_REWARD}}
 
     @route("bonus")
     async def bonus(u, b):
