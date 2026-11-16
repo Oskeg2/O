@@ -809,6 +809,7 @@ BOTOHUB_TOKEN = os.getenv("BOTOHUB_TOKEN", "").strip()      # токен из ht
 BOTOHUB_URL = os.getenv("BOTOHUB_URL", "https://botohub.me/get-tasks").strip()
 SUBS_ON = bool(BOTOHUB_TOKEN or SUB_CHANNELS)
 _bh_session = None
+BH_LAST = ""   # последняя ошибка/ответ BotoHub (для диагностики в окне заданий)
 
 
 def _sponsor_name(url: str, i: int) -> str:
@@ -818,7 +819,7 @@ def _sponsor_name(url: str, i: int) -> str:
 
 async def botohub_fetch(uid: int):
     """Запрос к BotoHub. Возвращает (ok, completed, links): ok=False — сервис недоступен/ошибка, completed — игрок выполнил всё."""
-    global _bh_session
+    global _bh_session, BH_LAST
     if _bh_session is None or _bh_session.closed:
         _bh_session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8))
     try:
@@ -826,13 +827,18 @@ async def botohub_fetch(uid: int):
                                     headers={"Content-Type": "application/json", "Auth": BOTOHUB_TOKEN}) as resp:
             data = await resp.json(content_type=None)
             if resp.status != 200:
-                log.warning("BotoHub HTTP %s: %s", resp.status, data)
+                BH_LAST = f"HTTP {resp.status}: {str(data)[:150]}"
+                log.warning("BotoHub %s", BH_LAST)
                 return False, False, []
     except Exception as e:
-        log.warning("BotoHub недоступен: %s", e)
+        BH_LAST = f"{type(e).__name__}: {str(e)[:150]}"
+        log.warning("BotoHub недоступен: %s", BH_LAST)
         return False, False, []
     if not isinstance(data, dict):
+        BH_LAST = f"ответ не JSON-объект: {str(data)[:150]}"
         return False, False, []
+    BH_LAST = f"ответ: {str(data)[:150]}"
+    log.info("BotoHub %s", BH_LAST)
     if data.get("completed") or data.get("skip"):
         return True, True, []
     links = [str(x).replace("https://telegram.me/", "https://t.me/") for x in (data.get("tasks") or [])]
@@ -865,7 +871,8 @@ async def tasks_sync(uid: int) -> dict:
     """Синхронизация заданий игрока с BotoHub + начисление наград.
     Возвращает: ok, tasks=[{name,url,paid}], new (сколько заданий засчитано сейчас), gained_cents, frac_cents, done_total."""
     if not TASKS_READY:                  # токена BotoHub нет — кнопка видна, но список заданий пуст
-        return {"ok": False, "tasks": [], "new": 0, "gained_cents": 0, "frac_cents": 0, "done_total": 0}
+        log.warning("Задания: не задан BOTOHUB_TOKEN (Render → Environment)")
+        return {"ok": False, "why": "no_token", "tasks": [], "new": 0, "gained_cents": 0, "frac_cents": 0, "done_total": 0}
     ok, _completed, links = await botohub_fetch(uid)
     new_n = gained = 0
     paid_urls: set = set()
@@ -900,7 +907,7 @@ async def tasks_sync(uid: int) -> dict:
             done_total = await con.fetchval(
                 "SELECT count(*) FROM hub_tasks WHERE user_id=$1 AND status='done'", uid) or 0
     tasks = [{"name": _sponsor_name(u, i + 1), "url": u, "paid": u in paid_urls} for i, u in enumerate(links)]
-    return {"ok": ok, "tasks": tasks, "new": new_n, "gained_cents": gained, "frac_cents": frac, "done_total": done_total}
+    return {"ok": ok, "why": "" if ok else "down", "err": BH_LAST, "tasks": tasks, "new": new_n, "gained_cents": gained, "frac_cents": frac, "done_total": done_total}
 
 
 async def missing_subs(bot: Bot, uid: int) -> list:
