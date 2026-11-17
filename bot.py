@@ -727,6 +727,7 @@ class St(StatesGroup):
     mines_bet = State()
     wd_amount = State()
     wd_details = State()
+    pf_name = State()
 
 
 r = Router()
@@ -1070,14 +1071,30 @@ async def cb_noop(cb: CallbackQuery):
     await cb.answer()
 
 
-@r.callback_query(F.data == "profile")
-async def cb_profile(cb: CallbackQuery):
-    uid = cb.from_user.id
-    row = await pool.fetchrow("SELECT balance, total_dep FROM users WHERE id=$1", uid)
+PF_EMOJI = ["😎", "🦊", "🐱", "🐼", "🦁", "🐸", "🤖", "👾", "🦄", "🐉", "👑", "🔥", "💎", "🚀", "🎩", "🌙"]
+PF_TITLES = ["Новичок", "Коллекционер", "Везунчик", "Охотник за редкостью", "Хайроллер", "Легенда"]
+PF_COLORS = [("🟣", "Фиолет"), ("🟢", "Бирюза"), ("🟠", "Золото"), ("🔴", "Рубин"),
+             ("🔵", "Океан"), ("🟩", "Мята"), ("⚪", "Сталь"), ("🌸", "Сакура")]
+
+
+def _esc(t: str) -> str:
+    return t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+async def profile_view(uid: int, tg_name: str):
+    row = await pool.fetchrow(
+        "SELECT balance, total_dep, prof_name, prof_emoji, prof_color, prof_title FROM users WHERE id=$1", uid)
     refs = await pool.fetchval("SELECT count(*) FROM users WHERE ref_by=$1", uid)
     inv = await pool.fetchval("SELECT count(*) FROM inventory WHERE user_id=$1", uid)
+    name = _esc(row["prof_name"] or tg_name or "Игрок")
+    emo = row["prof_emoji"] if row["prof_emoji"] in PF_EMOJI else "👤"
+    ci = row["prof_color"] if 0 <= row["prof_color"] < len(PF_COLORS) else 0
+    ti = row["prof_title"] if 0 <= row["prof_title"] < len(PF_TITLES) else 0
+    dot = PF_COLORS[ci][0]
     text = (
-        "👤 <b>Профиль</b>\n\n"
+        f"{dot} {emo} <b>{name}</b>\n"
+        f"🏷 {PF_TITLES[ti]}\n"
+        f"━━━━━━━━━━━━━━\n"
         f"ID: <code>{uid}</code>\n"
         f"💰 Баланс: <b>{row['balance']} ⭐</b>\n"
         f"💳 Всего пополнено: {row['total_dep']} ⭐\n"
@@ -1086,8 +1103,96 @@ async def cb_profile(cb: CallbackQuery):
         f"🔗 Ваша реферальная ссылка (+{REF_PERCENT}% с пополнений друзей):\n"
         f"<code>https://t.me/{BOT_USERNAME}?start=ref{uid}</code>"
     )
-    await show(cb, text, kb([BACK_ROW]))
+    markup = kb([
+        [btn("✏️ Ник", "pf_name"), btn("🎭 Аватар", "pf_emo")],
+        [btn("🎨 Цвет", "pf_col"), btn("🏷 Титул", "pf_ttl")],
+        [btn("♻️ Сбросить", "pf_reset")],
+        BACK_ROW,
+    ])
+    return text, markup
+
+
+@r.callback_query(F.data == "profile")
+async def cb_profile(cb: CallbackQuery, state: FSMContext):
+    await state.clear()
+    text, markup = await profile_view(cb.from_user.id, cb.from_user.first_name)
+    await show(cb, text, markup)
     await cb.answer()
+
+
+@r.callback_query(F.data == "pf_name")
+async def cb_pf_name(cb: CallbackQuery, state: FSMContext):
+    await state.set_state(St.pf_name)
+    await show(cb, "✏️ Отправьте новый ник (до 16 символов).\n«-» — убрать свой ник.",
+               kb([[btn("◀️ Назад", "profile")]]))
+    await cb.answer()
+
+
+@r.message(St.pf_name, F.text)
+async def msg_pf_name(m: Message, state: FSMContext):
+    t = " ".join(m.text.replace("<", "").replace(">", "").replace("&", "").split())[:16]
+    await pool.execute("UPDATE users SET prof_name=$2 WHERE id=$1", m.from_user.id, None if t in ("", "-") else t)
+    await state.clear()
+    text, markup = await profile_view(m.from_user.id, m.from_user.first_name)
+    await m.answer(text, reply_markup=markup)
+
+
+def _pf_grid(prefix: str, items, per_row: int):
+    rows, cur = [], []
+    for i, label in enumerate(items):
+        cur.append(btn(label, f"{prefix}:{i}"))
+        if len(cur) == per_row:
+            rows.append(cur)
+            cur = []
+    if cur:
+        rows.append(cur)
+    rows.append([btn("◀️ Назад", "profile")])
+    return kb(rows)
+
+
+@r.callback_query(F.data == "pf_emo")
+async def cb_pf_emo(cb: CallbackQuery):
+    await show(cb, "🎭 Выберите аватар:", _pf_grid("pfe", PF_EMOJI, 4))
+    await cb.answer()
+
+
+@r.callback_query(F.data == "pf_col")
+async def cb_pf_col(cb: CallbackQuery):
+    await show(cb, "🎨 Выберите цвет профиля:", _pf_grid("pfc", [f"{d} {n}" for d, n in PF_COLORS], 2))
+    await cb.answer()
+
+
+@r.callback_query(F.data == "pf_ttl")
+async def cb_pf_ttl(cb: CallbackQuery):
+    await show(cb, "🏷 Выберите титул:", _pf_grid("pft", PF_TITLES, 2))
+    await cb.answer()
+
+
+@r.callback_query(F.data.regexp(r"^pf[ect]:\d+$"))
+async def cb_pf_set(cb: CallbackQuery):
+    kind, idx = cb.data[2], int(cb.data.split(":")[1])
+    uid = cb.from_user.id
+    if kind == "e" and 0 <= idx < len(PF_EMOJI):
+        await pool.execute("UPDATE users SET prof_emoji=$2 WHERE id=$1", uid, PF_EMOJI[idx])
+    elif kind == "c" and 0 <= idx < len(PF_COLORS):
+        await pool.execute("UPDATE users SET prof_color=$2 WHERE id=$1", uid, idx)
+    elif kind == "t" and 0 <= idx < len(PF_TITLES):
+        await pool.execute("UPDATE users SET prof_title=$2 WHERE id=$1", uid, idx)
+    else:
+        await cb.answer()
+        return
+    text, markup = await profile_view(uid, cb.from_user.first_name)
+    await show(cb, text, markup)
+    await cb.answer("Сохранено ✅")
+
+
+@r.callback_query(F.data == "pf_reset")
+async def cb_pf_reset(cb: CallbackQuery):
+    await pool.execute(
+        "UPDATE users SET prof_name=NULL, prof_emoji=NULL, prof_color=0, prof_title=0 WHERE id=$1", cb.from_user.id)
+    text, markup = await profile_view(cb.from_user.id, cb.from_user.first_name)
+    await show(cb, text, markup)
+    await cb.answer("Профиль сброшен")
 
 
 @r.callback_query(F.data == "ach")
